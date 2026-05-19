@@ -65,12 +65,15 @@ async function netpasGetDistance(dep_port, arr_port) {
     throw new Error(`Netpas code ${data.code}: ${data.message || "unknown error"}`);
 
   // Correct response field is total_distance (double)
-  const nm = data.total_distance
-          ?? data.section?.[0]?.distance
-          ?? null;
+  const nm    = data.total_distance      ?? data.section?.[0]?.distance ?? null;
+  const ecaNm = data.total_seca_distance ?? data.total_eca_distance       ?? 0;
 
-  console.log(`Result: ${dep_port} → ${arr_port} = ${nm} NM`);
-  return nm ? Math.round(Number(nm)) : null;
+  console.log(`Result: ${dep_port} → ${arr_port} = ${nm} NM  (ECA: ${ecaNm} NM)`);
+  return {
+    total_nm:   nm    ? Math.round(Number(nm))    : null,
+    eca_nm:     ecaNm ? Math.round(Number(ecaNm)) : 0,
+    non_eca_nm: nm    ? Math.round(Number(nm) - Number(ecaNm || 0)) : null,
+  };
 }
 
 // ── License info (check expiry & day limit) ──────────────────────────────────
@@ -90,8 +93,8 @@ app.get("/api/test", async (req, res) => {
   const dep = req.query.from || "Norfolk";
   const arr = req.query.to   || "Corinth";
   try {
-    const nm = await netpasGetDistance(dep, arr);
-    res.json({ dep_port: dep, arr_port: arr, distance_nm: nm, status: "ok" });
+    const r = await netpasGetDistance(dep, arr);
+    res.json({ dep_port: dep, arr_port: arr, distance_nm: r.total_nm, eca_nm: r.eca_nm, non_eca_nm: r.non_eca_nm, status: "ok" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -103,8 +106,8 @@ app.post("/api/distance", async (req, res) => {
   if (!dep_port || !arr_port)
     return res.status(400).json({ error: "dep_port and arr_port required" });
   try {
-    const nm = await netpasGetDistance(dep_port, arr_port);
-    res.json({ dep_port, arr_port, distance_nm: nm });
+    const r = await netpasGetDistance(dep_port, arr_port);
+    res.json({ dep_port, arr_port, distance_nm: r.total_nm, eca_nm: r.eca_nm, non_eca_nm: r.non_eca_nm });
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ error: err.message });
@@ -119,8 +122,8 @@ app.post("/api/distances/batch", async (req, res) => {
   const results = {}, failures = [];
   for (const dep_port of ports) {
     try {
-      const nm = await netpasGetDistance(dep_port, arr_port);
-      if (nm && nm > 0) results[dep_port] = nm;
+      const r = await netpasGetDistance(dep_port, arr_port);
+      if (r.total_nm && r.total_nm > 0) results[dep_port] = { distance_nm: r.total_nm, eca_nm: r.eca_nm, non_eca_nm: r.non_eca_nm };
       else failures.push({ port: dep_port, reason: "no distance returned" });
     } catch (err) {
       failures.push({ port: dep_port, reason: err.message });
